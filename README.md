@@ -77,3 +77,11 @@ This project is built as a learning journey. Each milestone includes:
 This is a personal learning project, but suggestions welcome via Issues.
 📄 License
 MIT License - see LICENSE (LICENSE) for details.
+## Author
+
+**Aditya Yadav**
+Engineering student exploring embedded systems, robotics, and ROS2.
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
