@@ -16,6 +16,7 @@ This project implements a complete flight control stack for a quadcopter using:
 │  (C++/Py)   │                      │  Bridge  │   (UDP/Serial)   │  (SITL/FC)  │
 └─────────────┘                      └──────────┘                  └─────────────┘
 
+
 ## 📦 Package Structure
 
 | Package | Purpose | Status |
