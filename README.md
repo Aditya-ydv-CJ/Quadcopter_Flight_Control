@@ -67,4 +67,14 @@ ros2 run mavros mavros_node --ros-args -p fcu_url:="udp://:14540@127.0.0.1:14550
 
 # Terminal 3: Verify connection
 ros2 topic echo /mavros/state
+```
+
+## Author
+
+**Aditya Yadav**
+Engineering student exploring embedded systems, robotics, and ROS2.
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
 
