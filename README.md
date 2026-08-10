@@ -357,6 +357,8 @@ ros2 run mavros mavros_node --ros-args -p fcu_url:="udp://127.0.0.1:14550@" -p t
 ros2 topic echo /mavros/state
 ```
 
+[Screencast from 08-11-2026 02:27:23 AM.webm](https://github.com/user-attachments/assets/04735be0-8f98-4350-a691-b980d266726a)
+
 **Concepts Mastered**
 Quadcopter physics · PID theory · MAVLink protocol · MAVROS bridge · SITL vs hardware · Coordinate frames (ENU/NED/FRD) · Flight modes
 
