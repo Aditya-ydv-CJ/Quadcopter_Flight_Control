@@ -329,7 +329,7 @@ Profile with cProfile	    | Find bottlenecks	                              | pyt
 
 
 
-### **M0: Environment Setup & Verification** ✅
+# **M0: Environment Setup & Verification** ✅
 **Foundation** — Establish the complete simulation-to-ROS2 pipeline.
 
 **Deliverables**
@@ -357,14 +357,223 @@ ros2 run mavros mavros_node --ros-args -p fcu_url:="udp://127.0.0.1:14550@" -p t
 ros2 topic echo /mavros/state
 ```
 
-[Screencast from 08-11-2026 02:27:23 AM.webm](https://github.com/user-attachments/assets/04735be0-8f98-4350-a691-b980d266726a)
+##  @MAVLink Protocol — Quick Reference
 
-**Concepts Mastered**
-Quadcopter physics · PID theory · MAVLink protocol · MAVROS bridge · SITL vs hardware · Coordinate frames (ENU/NED/FRD) · Flight modes
+**What it is:** A lightweight, binary messaging protocol for talking to drones/vehicles — used between the autopilot, ground control stations, and companion computers (like MAVROS). Transport-agnostic: runs over serial, UDP, or TCP.
+
+**Addressing**
+- Every node has a `system_id` + `component_id` — e.g. `1.1` = vehicle system 1 / autopilot component; `1.191` = same vehicle / companion-computer component (this is what showed up as MAVROS's "MY ID").
+- `target_system` / `target_component` in a message = who it's addressed to.
+
+**Heartbeat**
+- Every node sends `HEARTBEAT` at 1 Hz to announce it's alive, plus its type/mode/armed state.
+- No heartbeat = the other side assumes disconnected. This is exactly what stalled our SITL earlier ("Waiting for heartbeat").
+
+**Versions**
+- MAVLink 1 — original, smaller message set.
+- MAVLink 2 — more messages, packet signing, extended payloads. What everything modern defaults to.
+
+**Dialects**
+- `common.xml` — messages every vehicle understands.
+- `ardupilotmega.xml` — ArduPilot-specific extensions on top of common.
+- PX4 uses its own extension dialect — part of why PX4 and ArduPilot setups aren't drop-in compatible.
+
+**Messages you'll actually touch**
+| Message | Purpose |
+|---|---|
+| `HEARTBEAT` | Alive signal, vehicle type, armed state |
+| `SYS_STATUS` | Battery, sensor health |
+| `GLOBAL_POSITION_INT` | Lat/lon/alt |
+| `ATTITUDE` | Roll/pitch/yaw |
+| `COMMAND_LONG` / `COMMAND_ACK` | Send a command (arm, set mode) + its result |
+| `AUTOPILOT_VERSION` | Capability negotiation — the one ArduPilot SITL often doesn't answer |
+
+**Default ports (the thing that actually bit us)**
+| Port | Used by |
+|---|---|
+| `14550` | ArduPilot SITL's default MAVLink/GCS output |
+| `14540` | PX4's default offboard/companion port |
+| `5760` (TCP) | ArduPilot SITL's raw "serial" master link |
+
+## @MAVROS Bridge — Quick Reference
+
+**What it is:** A ROS/ROS 2 node between MAVLink and ROS. It republishes incoming MAVLink messages as ROS topics, and translates outgoing ROS service/topic calls into MAVLink messages. Built as a set of plugins — each plugin owns one slice of functionality.
+
+**Connecting it**
+- `fcu_url` — where the autopilot is: `udp://<bind_host>:<bind_port>@<remote_host>:<remote_port>`. Leave everything after `@` empty to auto-detect the return address instead of guessing a port.
+- `gcs_url` — optional second output, lets a real GCS (e.g. QGroundControl) connect at the same time as MAVROS.
+- `target_system_id` / `target_component_id` — which vehicle MAVROS treats as "the" FCU (default `1`, `1`).
+
+**Topics you'll check constantly**
+| Topic | Tells you |
+|---|---|
+| `/mavros/state` | Connected? Armed? Current mode — check this first, always |
+| `/mavros/battery` | Voltage/percentage — good proof real data is flowing |
+| `/mavros/imu/data` | Orientation, angular velocity |
+| `/mavros/global_position/global` | GPS fix |
+| `/mavros/local_position/pose` | Position in the local ENU frame |
+
+**Services you'll call to control the vehicle**
+| Service | Does |
+|---|---|
+| `/mavros/cmd/arming` (`CommandBool`) | Arm / disarm |
+| `/mavros/set_mode` (`SetMode`) | Change flight mode (e.g. `GUIDED`) |
+| `/mavros/cmd/takeoff` | Takeoff to altitude |
+| `/mavros/cmd/land` | Land |
+
+**Sending setpoints (offboard-style control)**
+- `/mavros/setpoint_velocity/cmd_vel`
+- `/mavros/setpoint_position/local`
+- `/mavros/setpoint_raw/local`
+
+**Gotchas already hit (full detail in your troubleshooting notes)**
+- Wrong port → MAVROS never hears a heartbeat at all.
+- Hardcoded remote port in `fcu_url` → MAVROS hears the FCU but can't reply (`channel closed`).
+- `AUTOPILOT_VERSION` timeout warning is common with ArduPilot and usually harmless — trust `/mavros/state`, not that one warning.
+
+  
+## @Troubleshooting notes
+
+| # | Issue | Fix (short) |
+|---|-------|-------------|
+| 1 | Used PX4's MAVLink port (14540) instead of ArduPilot's | Use `14550` |
+| 2 | Fixed remote port in `fcu_url` caused `channel closed` errors | Use `udp://127.0.0.1:14550@` (auto-detect) |
+| 3 | `grep` with two words broke the pipe | Use `grep -E 'A\|B'` |
+| 4 | `AUTOPILOT_VERSION` warning looked fatal | It's benign — check `/mavros/state` instead |
+| 5 | No Gazebo window, SITL frozen on heartbeat | **Open** — GPU rendering suspected |
 
 ---
 
-### **M1: MAVROS Communication & Basic Commands**
+### 1. MAVROS connected to the wrong port (PX4's, not ArduPilot's)
+**Mistake:** Used `fcu_url:=udp://:14540@127.0.0.1:14550`.
+Port `14540` is PX4 SITL's default MAVLink port, not ArduPilot's —
+MAVROS was listening on the wrong port and never received a heartbeat.
+
+**Fix:** ArduPilot SITL sends MAVLink to `14550` by default:
+```bash
+ros2 run mavros mavros_node --ros-args \
+  -p fcu_url:="udp://127.0.0.1:14550@14555" \
+  -p target_system_id:=1 \
+  -p target_component_id:=1
+```
+
+**Lesson:** PX4 and ArduPilot default to different MAVLink ports
+(PX4 = 14540, ArduPilot = 14550). Check the SITL terminal's own
+startup output for the actual port instead of assuming.
+
+---
+
+### 2. MAVROS could receive but not send (`channel closed` spam)
+**Mistake:** Fixed the port above, but kept a hardcoded remote port —
+`udp://127.0.0.1:14550@14555`. MAVROS locked onto `14555` as the
+address to reply to, but nothing was listening there. Every outbound
+packet (heartbeats, version requests) got rejected, logged
+repeatedly as:
+```
+Error: mavconn: udp0: send: channel closed!
+    at line 229 in ./src/udp.cpp
+```
+
+**Fix:** Drop the fixed remote port and let MAVROS auto-detect the
+return address from the first packet it receives:
+```bash
+ros2 run mavros mavros_node --ros-args \
+  -p fcu_url:="udp://127.0.0.1:14550@" \
+  -p target_system_id:=1 \
+  -p target_component_id:=1
+```
+(The trailing `@` with nothing after it is intentional, not a typo.)
+
+**Lesson:** Don't manually pin a remote port in `fcu_url` unless you
+know for certain the FCU is listening there. Auto-detect (`@` with
+nothing after it) is the safer default for SITL.
+
+---
+
+### 3. `grep` "broke" the pipe searching for two things at once
+**Mistake:**
+```bash
+ros2 pkg list | grep turtlesim turtle_teleop_key
+```
+
+**Why it looked broken:** `grep PATTERN FILE` treats the *second*
+word as a filename to search inside, not a second pattern. grep
+tried and failed to open a file called `turtle_teleop_key`, exited
+immediately, and closed the pipe — triggering `ros2 pkg list`'s
+`BrokenPipeError`. Not a ROS 2 or install problem.
+
+**Fix:**
+```bash
+ros2 pkg list | grep -E 'turtlesim|teleop'
+```
+Also: `turtle_teleop_key` is an *executable* inside the `turtlesim`
+package, not a package itself — find it with
+`ros2 pkg executables turtlesim`.
+
+**Lesson:** Use `grep -E 'A|B'` to search for multiple patterns.
+Unrelated to the ArduPilot/MAVROS pipeline itself — just a general
+CLI habit worth remembering.
+
+---
+
+### 4. "your FCU don't support AUTOPILOT_VERSION" — looked like an error, wasn't
+**Symptom:**
+```
+[WARN] VER: broadcast request timeout, retries left 4
+...
+[WARN] VER: your FCU don't support AUTOPILOT_VERSION, switched to default capabilities
+```
+
+**Turned out to be:** Not a bug. This is a known, common quirk when
+MAVROS talks to ArduPilot SITL specifically — MAVROS asks for exact
+capability info, ArduPilot SITL often doesn't answer that particular
+request, and MAVROS just falls back to default capabilities. It
+fires once at startup, not on a repeating loop.
+
+**How to actually check the link is fine:**
+```bash
+ros2 topic echo /mavros/state       # look for connected: true
+ros2 topic echo /mavros/battery     # real data = real connection
+```
+
+**Lesson:** Not every `WARN` in the mavros log means something is
+broken — check the concrete `/mavros/state` topic before chasing a
+warning that might just be cosmetic.
+
+---
+
+### 5. Gazebo window never opens (OPEN — still debugging)
+**Symptom:** All nodes launch with no crash, but no Gazebo GUI window
+appears at all. SITL's terminal sits frozen on:
+```
+Waiting for heartbeat from tcp:127.0.0.1:5760
+```
+
+**Current hypothesis:** ArduCopter SITL won't finish booting (and so
+never heartbeats) until Gazebo sends it a first physics/sensor
+packet. If Gazebo's GUI never actually starts — commonly caused by
+hybrid NVIDIA/Intel graphics rendering to the wrong GPU — SITL just
+waits forever with no error message.
+
+**Diagnostics in progress:**
+```bash
+gz sim shapes.sdf                                                              # does Gazebo work at all, standalone?
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia gz sim shapes.sdf # force the NVIDIA GPU
+glxinfo | grep "OpenGL renderer"                                               # confirm which GPU is rendering
+```
+
+**Status:** Not yet resolved — update this entry once the root cause
+is confirmed.
+
+## **Response Video** 
+[Screencast from 08-11-2026 02:27:23 AM.webm](https://github.com/user-attachments/assets/04735be0-8f98-4350-a691-b980d266726a)
+
+## **Concepts Mastered**
+Quadcopter physics · MAVLink protocol · MAVROS bridge · SITL vs hardware · Flight modes
+
+---
+
+# **M1: MAVROS Communication & Basic Commands**
 **Abstraction Layer** — Clean ROS2 API over MAVROS; full vehicle command authority.
 
 **Deliverables**
@@ -377,7 +586,7 @@ ROS2 interfaces (msg/srv/action) · MAVROS service mapping · OFFBOARD requireme
 
 ---
 
-### **M2: State Estimation & Sensor Fusion**
+# **M2: State Estimation & Sensor Fusion**
 **Perception** — Fused, high-rate state estimate with covariance.
 
 **Deliverables**
@@ -390,7 +599,7 @@ Sensor models · Complementary filter / EKF · Noise characterization · Covaria
 
 ---
 
-### **M3: Basic Flight Control (Takeoff/Hover/Land)**
+# **M3: Basic Flight Control (Takeoff/Hover/Land)**
 **Control** — Cascaded PID loops achieving stable hover.
 
 **Deliverables**
@@ -404,7 +613,7 @@ Cascaded control architecture · PID tuning · Motor mixing (X-config) · Anti-w
 
 ---
 
-### **M4: Position Control & Waypoint Navigation**
+# **M4: Position Control & Waypoint Navigation**
 **Guidance** — Fly arbitrary 3D trajectories with precision.
 
 **Deliverables**
@@ -418,7 +627,7 @@ Path following (pure pursuit, L1, Stanley) · Trajectory generation · Waypoint 
 
 ---
 
-### **M5: Mission System & Autonomy**
+# **M5: Mission System & Autonomy**
 **Autonomy** — Complete mission executive with QGroundControl integration.
 
 **Deliverables**
@@ -432,7 +641,7 @@ Behavior trees / state machines · MAVLink mission protocol · Action server pat
 
 ---
 
-### **M6: Safety Systems & Failsafes**
+# **M6: Safety Systems & Failsafes**
 **Reliability** — Autonomous protection against failures.
 
 **Deliverables**
@@ -446,7 +655,7 @@ Failsafe hierarchy · Battery modeling · Geofence math · MAVLink heartbeat mon
 
 ---
 
-### **M7: Integration Testing & Simulation Campaign**
+# **M7: Integration Testing & Simulation Campaign**
 **Validation** — Verified, regression-tested, performant system.
 
 **Deliverables**
@@ -461,7 +670,7 @@ ROS2 testing (ament_pytest, launch_testing) · Headless SITL automation · GitHu
 
 ---
 
-### **M8: Hardware Deployment & Real Flight**
+# **M8: Hardware Deployment & Real Flight**
 **Deployment** — From simulation to sky.
 
 **Deliverables**
