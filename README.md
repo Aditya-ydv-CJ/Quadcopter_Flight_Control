@@ -245,64 +245,7 @@ RTL	                  | ArduPilot	             | Return to Launch (safety)
 LAND	              | ArduPilot	             | Auto-land
 ```
 
-# 🔑 Key Python-Specific Files
-```
-## setup.py (replaces CMakeLists.txt)
-from setuptools import find_packages, setup
 
-package_name = 'quad_mavros_bridge'
-
-setup(
-    name=package_name,
-    version='0.0.1',
-    packages=find_packages(exclude=['test']),
-    data_files=[
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/launch', ['launch/mavros_bridge.launch.py']),
-    ],
-    install_requires=['setuptools'],
-    zip_safe=True,
-    maintainer='aditya',
-    maintainer_email='aditya@example.com',
-    description='MAVROS bridge wrapper for quadcopter',
-    license='MIT',
-    tests_require=['pytest'],
-    entry_points={
-        'console_scripts': [
-            'state_publisher = quad_mavros_bridge.state_publisher:main',
-            'pose_publisher = quad_mavros_bridge.pose_publisher:main',
-            'command_client = quad_mavros_bridge.command_client:main',
-            'setpoint_publisher = quad_mavros_bridge.setpoint_publisher:main',
-        ],
-    },
-)
-
-## package.xml (Python deps)
-
-<depend>rclpy</depend>
-<depend>mavros_msgs</depend>
-<depend>geometry_msgs</depend>
-<depend>quad_interfaces</depend>
-<test_depend>ament_copyright</test_depend>
-<test_depend>ament_flake8</test_depend>
-<test_depend>ament_pep257</test_depend>
-<test_depend>pytest</test_depend>
-
-## pyproject.toml (modern config)
-
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[tool.pytest.ini_options]
-pythonpath = ["src"]
-
-[tool.black]
-line-length = 100
-target-version = ['py310']
-``` 
 # ⚠️ One Exception: quad_interfaces  
 ```
 Must remain ament_cmake because ROS2 message generation (.msg, .srv, .action → Python/C++ classes) only works with CMake.
